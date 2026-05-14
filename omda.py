@@ -1,4 +1,5 @@
 import io
+import hmac
 import os
 import re
 import zipfile
@@ -27,6 +28,57 @@ MAIN_MARKERS = ["main", "hero", "primary", "front"]
 # Cloudinary behavior
 OVERWRITE_DUPLICATES = True  # True = overwrite same public_id, False = keep existing
 DEFAULT_CLOUDINARY_FOLDER = "amazon-images"
+
+
+# -----------------------------
+# SIMPLE APP ACCESS CONTROL
+# -----------------------------
+def get_app_passwords() -> List[str]:
+    passwords: List[str] = []
+
+    single_password = str(st.secrets.get("APP_PASSWORD", "")).strip()
+    if single_password:
+        passwords.append(single_password)
+
+    multiple_passwords = st.secrets.get("APP_PASSWORDS", [])
+    if isinstance(multiple_passwords, str):
+        passwords.extend(p.strip() for p in multiple_passwords.split(",") if p.strip())
+    else:
+        passwords.extend(str(p).strip() for p in multiple_passwords if str(p).strip())
+
+    env_password = os.getenv("APP_PASSWORD", "").strip()
+    if env_password:
+        passwords.append(env_password)
+
+    env_passwords = os.getenv("APP_PASSWORDS", "")
+    if env_passwords:
+        passwords.extend(p.strip() for p in env_passwords.split(",") if p.strip())
+
+    return passwords
+
+
+def require_app_password() -> None:
+    passwords = get_app_passwords()
+    if not passwords:
+        st.error("Missing app password. Set APP_PASSWORD or APP_PASSWORDS in Streamlit secrets.")
+        st.stop()
+
+    if st.session_state.get("authenticated"):
+        return
+
+    st.title("Amazon Image Host")
+    with st.form("login_form"):
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log in")
+
+    if submitted:
+        submitted_password = password.encode("utf-8")
+        if any(hmac.compare_digest(submitted_password, saved_password.encode("utf-8")) for saved_password in passwords):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        st.error("Invalid password.")
+
+    st.stop()
 
 
 # -----------------------------
@@ -223,6 +275,7 @@ def build_output_df(urls_by_sku: Dict[str, List[str]]) -> pd.DataFrame:
 # STREAMLIT UI (UPLOAD ONLY)
 # -----------------------------
 st.set_page_config(page_title="Amazon Images → Cloudinary", layout="wide")
+require_app_password()
 st.title("Amazon Image Host — Cloudinary - Developed by absi developer @Tegaraty.com")
 
 # Preflight: Cloudinary credentials
